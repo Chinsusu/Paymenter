@@ -9,12 +9,16 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-24.04
+    env:
+      CF_R2_ACCOUNT_ID: ${{ secrets.CF_R2_ACCOUNT_ID }}
+      CF_R2_KEY_ID: ${{ secrets.CF_R2_KEY_ID }}
+      CF_R2_KEY_ACCESS: ${{ secrets.CF_R2_KEY_ACCESS }}
     steps:
       - name: Code checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 22
 
@@ -46,12 +50,20 @@ jobs:
           cp paymenter.tar.gz r2_upload/
 
       # Upload artifact
-      - name: Upload archive
+      - name: Upload archive to R2
+        if: env.CF_R2_ACCOUNT_ID != '' && env.CF_R2_KEY_ID != '' && env.CF_R2_KEY_ACCESS != ''
         uses: ryand56/r2-upload-action@latest
         with:
-          r2-account-id: ${{ secrets.CF_R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.CF_R2_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.CF_R2_KEY_ACCESS }}
+          r2-account-id: ${{ env.CF_R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ env.CF_R2_KEY_ID }}
+          r2-secret-access-key: ${{ env.CF_R2_KEY_ACCESS }}
           r2-bucket: paymenter-api
           source-dir: r2_upload
           destination-dir: ./
+
+      - name: Upload archive artifact
+        if: env.CF_R2_ACCOUNT_ID == '' || env.CF_R2_KEY_ID == '' || env.CF_R2_KEY_ACCESS == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: paymenter-beta
+          path: r2_upload/paymenter.tar.gz
