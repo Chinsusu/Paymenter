@@ -20,6 +20,20 @@ class HAVProxyIPv4DCTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_config_uses_simple_base_url_token_and_line_based_location_map_fields(): void
+    {
+        $config = $this->extension()->getConfig();
+        $fields = collect($config)->keyBy('name');
+
+        $this->assertTrue($fields->has('base_url'));
+        $this->assertTrue($fields->has('api_token'));
+        $this->assertTrue($fields->has('location_map'));
+        $this->assertFalse($fields->has('base_url_profiles'));
+        $this->assertSame('text', $fields['base_url']['type']);
+        $this->assertSame('password', $fields['api_token']['type']);
+        $this->assertStringContainsString('provider-group-or-code=internal-location-code', $fields['location_map']['description']);
+    }
+
     public function test_v3_client_sends_base_url_auth_and_idempotency_headers(): void
     {
         Http::fake([
@@ -67,9 +81,7 @@ class HAVProxyIPv4DCTest extends TestCase
 
         $provider = $this->createProvider();
         $extension = $this->extension([
-            'location_map' => [
-                'billing-us' => 'united-states',
-            ],
+            'location_map' => 'billing-us=united-states',
         ]);
 
         $stats = $extension->syncLocationTargets($provider);
@@ -117,6 +129,8 @@ class HAVProxyIPv4DCTest extends TestCase
 
         $provider = $this->createProvider();
         $extension = $this->extension([
+            'base_url' => null,
+            'api_token' => null,
             'base_url_profiles' => [
                 [
                     'key' => 'primary',
@@ -187,6 +201,33 @@ class HAVProxyIPv4DCTest extends TestCase
             'provider_id' => $provider->id,
             'service_type' => ProviderLocationOffering::SERVICE_PROXY,
             'stock_state' => ProviderLocationOffering::STOCK_UNAVAILABLE,
+        ]);
+    }
+
+    public function test_sync_location_targets_auto_maps_by_location_name_without_override(): void
+    {
+        Http::fake([
+            'https://edge.example.com/api/v3/inventory/groups*' => Http::response([
+                'data' => [
+                    [
+                        'id' => 'group_us',
+                        'billing_group_id' => 'billing-us',
+                        'name' => 'United States',
+                        'status' => 'available',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $provider = $this->createProvider();
+
+        $stats = $this->extension()->syncLocationTargets($provider);
+
+        $this->assertSame(1, $stats['created']);
+        $this->assertDatabaseHas('provider_location_targets', [
+            'external_location_id' => 'group_us',
+            'external_location_code' => 'billing-us',
+            'external_name' => 'United States',
         ]);
     }
 
@@ -373,15 +414,8 @@ class HAVProxyIPv4DCTest extends TestCase
     private function extension(array $overrides = []): HAVProxyIPv4DC
     {
         return new HAVProxyIPv4DC(array_merge([
-            'base_url_profiles' => [
-                [
-                    'key' => 'primary',
-                    'label' => 'Primary',
-                    'base_url' => 'https://edge.example.com',
-                    'api_token' => 'secret-token',
-                    'enabled' => true,
-                ],
-            ],
+            'base_url' => 'https://edge.example.com',
+            'api_token' => 'secret-token',
             'default_auth_header' => 'Authorization',
             'user_agent' => 'HAV-Proxy-IPv4-DC-Paymenter/1.0',
             'timeout_seconds' => 5,

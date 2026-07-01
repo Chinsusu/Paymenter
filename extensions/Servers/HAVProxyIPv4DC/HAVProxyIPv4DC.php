@@ -31,25 +31,24 @@ class HAVProxyIPv4DC extends Server
 
     public function getConfig($values = []): array
     {
+        $hasLegacyProfiles = !empty($values['base_url_profiles']);
+
         return [
             [
-                'name' => 'base_url_profiles',
-                'type' => 'textarea',
-                'label' => 'Base URL Profiles',
-                'description' => 'JSON array. Each profile needs key, base_url, api_token, and optional auth_header.',
-                'required' => true,
+                'name' => 'base_url',
+                'type' => 'text',
+                'label' => 'Base URL',
+                'description' => 'Root URL of the HAV Proxy API. /api/v3 is added automatically if omitted.',
+                'required' => !$hasLegacyProfiles,
+                'validation' => $hasLegacyProfiles ? 'nullable|url' : 'url',
+                'placeholder' => 'https://proxy-api.example.com',
+            ],
+            [
+                'name' => 'api_token',
+                'type' => 'password',
+                'label' => 'API Token',
+                'required' => !$hasLegacyProfiles,
                 'encrypted' => true,
-                'validation' => 'json',
-                'default' => json_encode([
-                    [
-                        'key' => 'primary',
-                        'label' => 'Primary',
-                        'base_url' => 'https://proxy-api.example.com',
-                        'api_token' => 'token',
-                        'auth_header' => 'Authorization',
-                        'enabled' => true,
-                    ],
-                ], JSON_PRETTY_PRINT),
             ],
             [
                 'name' => 'default_auth_header',
@@ -66,12 +65,9 @@ class HAVProxyIPv4DC extends Server
             [
                 'name' => 'location_map',
                 'type' => 'textarea',
-                'label' => 'Location Map',
-                'description' => 'JSON object mapping provider group id/code/name to internal location_options.code.',
-                'validation' => 'nullable|json',
-                'default' => json_encode([
-                    'provider-group-or-code' => 'united-states',
-                ], JSON_PRETTY_PRINT),
+                'label' => 'Location Map Overrides',
+                'description' => 'Optional. One mapping per line: provider-group-or-code=internal-location-code. Leave blank to auto-match by location code/name.',
+                'placeholder' => "billing-us=united-states\nvn-viettel=viet-nam-viettel",
             ],
             [
                 'name' => 'user_agent',
@@ -572,6 +568,14 @@ class HAVProxyIPv4DC extends Server
 
     private function profiles(): array
     {
+        $simpleProfile = $this->simpleProfile();
+
+        if ($simpleProfile) {
+            return [
+                $simpleProfile['key'] => $simpleProfile,
+            ];
+        }
+
         $value = $this->config('base_url_profiles');
         $profiles = is_array($value) ? $value : json_decode((string) $value, true);
 
@@ -605,6 +609,29 @@ class HAVProxyIPv4DC extends Server
         }
 
         return $normalized;
+    }
+
+    private function simpleProfile(): ?array
+    {
+        $baseUrl = $this->config('base_url');
+        $apiToken = $this->config('api_token');
+
+        if (!$baseUrl && !$apiToken) {
+            return null;
+        }
+
+        if (!$baseUrl || !$apiToken) {
+            throw new Exception('Base URL and API Token are required.');
+        }
+
+        return [
+            'key' => 'primary',
+            'label' => 'Primary',
+            'base_url' => (string) $baseUrl,
+            'api_token' => (string) $apiToken,
+            'auth_header' => (string) ($this->config('default_auth_header') ?? 'Authorization'),
+            'enabled' => true,
+        ];
     }
 
     private function profileForTarget(ProviderLocationTarget $target): array
@@ -653,10 +680,10 @@ class HAVProxyIPv4DC extends Server
             return [];
         }
 
-        $map = is_array($value) ? $value : json_decode((string) $value, true);
+        $map = is_array($value) ? $value : $this->parseLocationMap((string) $value);
 
         if (!is_array($map)) {
-            throw new Exception('Location Map must be valid JSON.');
+            throw new Exception('Location Map must use provider-code=location-code lines.');
         }
 
         $normalized = [];
@@ -667,6 +694,45 @@ class HAVProxyIPv4DC extends Server
         }
 
         return $normalized;
+    }
+
+    private function parseLocationMap(string $value): array
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return [];
+        }
+
+        if (str_starts_with($trimmed, '{')) {
+            $decoded = json_decode($trimmed, true);
+
+            if (!is_array($decoded)) {
+                throw new Exception('Location Map JSON is invalid.');
+            }
+
+            return $decoded;
+        }
+
+        $map = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $trimmed) as $line) {
+            $line = trim($line);
+
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $parts = preg_split('/\s*(?:=>|=|:)\s*/', $line, 2);
+
+            if (count($parts) !== 2 || trim($parts[0]) === '' || trim($parts[1]) === '') {
+                throw new Exception('Invalid Location Map line: ' . $line);
+            }
+
+            $map[trim($parts[0])] = trim($parts[1]);
+        }
+
+        return $map;
     }
 
     private function mappedLocationCode(array $group, array $locationMap): ?string
@@ -680,6 +746,25 @@ class HAVProxyIPv4DC extends Server
 
             if (isset($locationMap[$lower])) {
                 return $locationMap[$lower];
+            }
+        }
+
+        return $this->autoMappedLocationCode($group);
+    }
+
+    private function autoMappedLocationCode(array $group): ?string
+    {
+        $candidates = [];
+
+        foreach ($this->externalKeys($group) as $key) {
+            $candidates[] = $key;
+            $candidates[] = Str::lower($key);
+            $candidates[] = Str::slug($key);
+        }
+
+        foreach (array_values(array_unique(array_filter($candidates))) as $candidate) {
+            if (LocationOption::where('code', $candidate)->where('status', LocationOption::STATUS_ACTIVE)->exists()) {
+                return $candidate;
             }
         }
 
