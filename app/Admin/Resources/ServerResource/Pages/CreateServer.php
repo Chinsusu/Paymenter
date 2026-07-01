@@ -28,14 +28,23 @@ class CreateServer extends CreateRecord
             return $record;
         }
 
-        foreach ($data['settings'] as $key => $value) {
+        $config = ExtensionHelper::getConfig($record->type, $record->extension);
+
+        foreach ($config as $option) {
+            $value = $data['settings'][$option['name']] ?? null;
+
             if (is_null($value)) {
                 continue;
             }
+
             $record->settings()->updateOrCreate([
-                'key' => $key,
+                'key' => $option['name'],
+                'settingable_id' => $record->id,
+                'settingable_type' => $record->getMorphClass(),
             ], [
+                'type' => $option['database_type'] ?? 'string',
                 'value' => $value,
+                'encrypted' => $option['encrypted'] ?? false,
             ]);
         }
 
