@@ -32,7 +32,17 @@ jobs:
             type=ref,event=tag
             type=ref,event=branch
 
+      - name: Select Docker platforms
+        id: platforms
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=linux/amd64" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup QEMU
+        if: github.event_name == 'release'
         uses: docker/setup-qemu-action@v3
 
       - name: Setup Docker buildx
@@ -58,7 +68,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ steps.platforms.outputs.value }}
           labels: ${{ steps.metadata.outputs.labels }}
           tags: ${{ steps.metadata.outputs.tags }}
           cache-from: type=gha
