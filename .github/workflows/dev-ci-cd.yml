@@ -1,0 +1,156 @@
+name: Dev CI/CD
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: paymenter_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: bcmath, curl, gd, intl, mbstring, mysql, openssl, pdo, pdo_mysql, tokenizer, xml, zip
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Copy environment
+        run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Generate application key
+        run: php artisan key:generate --force
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build storefront assets
+        run: npm run build
+
+      - name: Build admin assets
+        run: npm run build:admin
+
+      - name: Check PHP style
+        run: ./vendor/bin/pint --test
+
+      - name: Run tests
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: paymenter_test
+          DB_USERNAME: root
+          DB_PASSWORD: password
+          DB_COLLATION: utf8mb4_unicode_ci
+          CACHE_STORE: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+        run: php artisan test
+
+  deploy-dev:
+    name: Deploy development
+    runs-on: ubuntu-latest
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    environment: development
+    env:
+      DEV_SSH_HOST: ${{ secrets.DEV_SSH_HOST }}
+      DEV_SSH_PORT: ${{ secrets.DEV_SSH_PORT }}
+      DEV_SSH_USER: ${{ secrets.DEV_SSH_USER }}
+      DEV_SSH_KEY: ${{ secrets.DEV_SSH_KEY }}
+      DEV_APP_PATH: ${{ secrets.DEV_APP_PATH }}
+      DEV_URL: ${{ secrets.DEV_URL }}
+
+    steps:
+      - name: Skip deploy when secrets are not configured
+        if: env.DEV_SSH_HOST == '' || env.DEV_SSH_USER == '' || env.DEV_SSH_KEY == ''
+        run: echo "Development deploy skipped because SSH secrets are not configured."
+
+      - name: Deploy over SSH
+        if: env.DEV_SSH_HOST != '' && env.DEV_SSH_USER != '' && env.DEV_SSH_KEY != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          port="${DEV_SSH_PORT:-22}"
+          app_path="${DEV_APP_PATH:-/var/www/paymenter}"
+          url="${DEV_URL:-https://client.havdigital.com}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEV_SSH_KEY" > ~/.ssh/dev_deploy_key
+          chmod 600 ~/.ssh/dev_deploy_key
+          ssh-keyscan -p "$port" "$DEV_SSH_HOST" >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/dev_deploy_key -p "$port" "$DEV_SSH_USER@$DEV_SSH_HOST" \
+            APP_PATH="$app_path" DEV_URL="$url" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+
+          cd "$APP_PATH"
+          git remote -v
+          git fetch origin
+          git switch master
+          git pull --ff-only origin master
+
+          composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+          php artisan migrate --force
+          php artisan db:seed --class=LocationCatalogSeeder --force
+          php artisan optimize:clear
+          php artisan config:cache
+          php artisan route:cache
+          php artisan view:cache
+          npm ci
+          npm run build
+          npm run build:admin
+          php artisan queue:restart
+
+          if command -v supervisorctl >/dev/null 2>&1; then
+            sudo supervisorctl restart paymenter-worker:* || true
+          fi
+
+          sudo systemctl reload php8.3-fpm || true
+          sudo systemctl reload nginx || true
+
+          php artisan migrate:status
+          curl --fail --head "$DEV_URL"
+          REMOTE
