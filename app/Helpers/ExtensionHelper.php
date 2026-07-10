@@ -547,10 +547,10 @@ class ExtensionHelper
     public static function getServiceProperties(Service $service)
     {
         $properties = [];
-        foreach ($service->properties as $property) {
+        foreach ($service->properties()->get() as $property) {
             $properties[$property->key] = $property->value;
         }
-        foreach ($service->configs as $config) {
+        foreach ($service->configs()->with(['configOption', 'configValue'])->get() as $config) {
             $properties[$config->configOption->env_variable] = $config->configValue->env_variable ?? $config->configValue->name;
         }
 
@@ -594,6 +594,27 @@ class ExtensionHelper
         self::recordAudit($service, 'extension_action', [], ['action' => 'create_server']);
 
         return self::getExtension('server', $server->extension, $server->settings)->createServer($service, self::settingsToArray($service->product->settings), self::getServiceProperties($service));
+    }
+
+    /**
+     * Poll a provider operation without holding a queue worker while it remains pending.
+     */
+    public static function pollServerOperation(Service $service, string $action, string $operationId)
+    {
+        $server = self::checkServer($service, 'pollOperation');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        if (!method_exists($extension, 'pollOperation')) {
+            throw new Exception('Server does not support provider operation polling.');
+        }
+
+        return $extension->pollOperation(
+            $service,
+            self::settingsToArray($service->product->settings),
+            self::getServiceProperties($service),
+            $action,
+            $operationId,
+        );
     }
 
     /**

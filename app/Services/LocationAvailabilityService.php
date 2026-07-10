@@ -8,6 +8,7 @@ use App\Models\ProductLocationOffering;
 use App\Models\ProviderLocationOffering;
 use App\Models\ProviderLocationTarget;
 use App\Models\Service;
+use Exception;
 use Illuminate\Database\Eloquent\Collection;
 
 class LocationAvailabilityService
@@ -94,6 +95,42 @@ class LocationAvailabilityService
         }
 
         return $snapshot;
+    }
+
+    /**
+     * Freeze the selected provider target while the customer order is created.
+     * Provisioning must not depend on mutable product mappings after payment.
+     */
+    public static function snapshotProductOffering(Service $service, int $productLocationOfferingId, ?string $serviceType = null): array
+    {
+        $productOffering = ProductLocationOffering::query()
+            ->with(['providerLocationOffering.locationOption', 'providerLocationOffering.targets'])
+            ->whereKey($productLocationOfferingId)
+            ->where('product_id', $service->product_id)
+            ->where('enabled', true)
+            ->first();
+
+        if (!$productOffering) {
+            throw new Exception('Selected location is not enabled for this product.');
+        }
+
+        $providerOffering = $productOffering->providerLocationOffering;
+        if (!$providerOffering || $providerOffering->provider_id !== $service->product->server_id) {
+            throw new Exception('Selected location belongs to a different provider.');
+        }
+        if ($serviceType && $providerOffering->service_type !== $serviceType) {
+            throw new Exception('Selected location is not available for this service type.');
+        }
+        if (!$providerOffering->enabled || $providerOffering->stock_state === ProviderLocationOffering::STOCK_UNAVAILABLE) {
+            throw new Exception('Selected location is out of stock.');
+        }
+
+        $target = self::resolveTarget($providerOffering);
+        if (!$target?->external_location_code) {
+            throw new Exception('Selected location is missing provider group mapping.');
+        }
+
+        return self::snapshotSelection($service, $providerOffering);
     }
 
     public static function checkoutOptionsForProduct(int|Product $product, ?string $serviceType = null): array

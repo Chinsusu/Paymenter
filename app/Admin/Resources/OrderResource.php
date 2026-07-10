@@ -11,6 +11,9 @@ use App\Helpers\ExtensionHelper;
 use App\Models\Currency;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductLocationOffering;
+use App\Models\ProviderLocationOffering;
+use App\Services\LocationAvailabilityService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -65,6 +68,11 @@ class OrderResource extends Resource
                     ->label('Services')
                     ->columnSpanFull()
                     ->columns(2)
+                    ->mutateRelationshipDataBeforeCreateUsing(function (array $data): array {
+                        unset($data['product_location_offering_id']);
+
+                        return $data;
+                    })
                     ->schema([
                         Hidden::make('user_id')
                             ->default(fn (Get $get) => $get('../../user_id')),
@@ -82,8 +90,19 @@ class OrderResource extends Resource
                             ->searchable()
                             ->preload()
                             ->live()
-                            ->afterStateUpdated(fn (Set $set) => $set('plan_id', null))
+                            ->afterStateUpdated(function (Set $set) {
+                                $set('plan_id', null);
+                                $set('product_location_offering_id', null);
+                            })
                             ->placeholder('Select the product'),
+                        Select::make('product_location_offering_id')
+                            ->label('Location')
+                            ->options(fn (Get $get) => self::productLocationOptions($get('product_id')))
+                            ->searchable()
+                            ->preload()
+                            ->hidden(fn (Get $get) => self::productLocationOptions($get('product_id')) === [])
+                            ->required(fn (Get $get) => self::productLocationOptions($get('product_id')) !== [])
+                            ->placeholder('Select the location'),
                         Select::make('plan_id')
                             ->label('Plan')
                             ->required()
@@ -146,6 +165,30 @@ class OrderResource extends Resource
                             ]),
                     ]),
             ]);
+    }
+
+    public static function productLocationOptions(?int $productId): array
+    {
+        if (!$productId) {
+            return [];
+        }
+
+        $product = Product::find($productId);
+        if (!$product?->server_id) {
+            return [];
+        }
+
+        return LocationAvailabilityService::forProduct($product, ProviderLocationOffering::SERVICE_PROXY)
+            ->filter(fn (ProductLocationOffering $offering) => $offering->providerLocationOffering->stock_state !== ProviderLocationOffering::STOCK_UNAVAILABLE)
+            ->filter(fn (ProductLocationOffering $offering) => LocationAvailabilityService::resolveTarget($offering->providerLocationOffering) !== null)
+            ->mapWithKeys(function (ProductLocationOffering $offering) {
+                $location = $offering->providerLocationOffering->locationOption;
+                $group = $location->primaryGroup?->name;
+                $label = $group ? $group . ' / ' . $location->display_name : $location->display_name;
+
+                return [$offering->id => $label];
+            })
+            ->all();
     }
 
     public static function table(Table $table): Table

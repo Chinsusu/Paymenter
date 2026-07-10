@@ -10,6 +10,7 @@ use App\Classes\FilamentInput;
 use App\Helpers\ExtensionHelper;
 use App\Models\Currency;
 use App\Models\Product;
+use App\Models\ProviderLocationOffering;
 use App\Models\Server;
 use Exception;
 use Filament\Actions\Action;
@@ -103,25 +104,9 @@ class ProductResource extends Resource
                                     ->preload()
                                     ->createOptionForm(fn (Schema $schema) => CategoryResource::form($schema))
                                     ->required(),
-                            ]),
-                        Tab::make('Pricing')
-                            ->schema([self::plan()]),
-
-                        Tab::make('Upgrades')
-                            ->schema([
-                                // Select input for the products this product can upgrade to (hasmany relationship)
-                                Select::make('upgrades')
-                                    ->label('Upgrades')
-                                    ->relationship('upgrades', 'name', ignoreRecord: true)
-                                    ->multiple()
-                                    ->preload()
-                                    ->placeholder('Select the products that this product can upgrade to'),
-                            ]),
-
-                        Tab::make('Server')
-                            ->schema([
                                 Select::make('server_id')
-                                    ->relationship('server', 'name')
+                                    ->label('Server / Provider')
+                                    ->options(fn () => Server::query()->pluck('name', 'id')->all())
                                     ->searchable()
                                     ->preload()
                                     ->hintAction(
@@ -131,15 +116,18 @@ class ProductResource extends Resource
                                             ->hidden(fn (Get $get) => $get('server_id') === null)
                                     )
                                     ->live()
-                                    ->afterStateUpdated(fn (Select $component) => $component
-                                        ->getContainer()
-                                        ->getComponent('extension_settings', withHidden: true)
-                                        ->getChildSchema()
-                                        ->fill()),
-
+                                    ->afterStateUpdated(function (Select $component, Set $set) {
+                                        $set('product_location_offering_ids', []);
+                                        $component
+                                            ->getContainer()
+                                            ->getComponent('extension_settings', withHidden: true)
+                                            ->getChildSchema()
+                                            ->fill();
+                                    }),
                                 Grid::make()
                                     ->hidden(fn (Get $get) => $get('server_id') === null)
                                     ->columns(2)
+                                    ->columnSpanFull()
                                     ->key('extension_settings')
                                     ->schema(
                                         function (Get $get, Component $livewire) {
@@ -162,7 +150,28 @@ class ProductResource extends Resource
                                             return $settings;
                                         }
                                     ),
+                                Select::make('product_location_offering_ids')
+                                    ->label('Sellable Locations')
+                                    ->multiple()
+                                    ->searchable()
+                                    ->preload()
+                                    ->options(fn (Get $get) => self::providerLocationOptions($get('server_id')))
+                                    ->hidden(fn (Get $get) => $get('server_id') === null)
+                                    ->required(fn (Get $get) => self::providerLocationOptions($get('server_id')) !== [])
+                                    ->helperText('Choose which provider locations this product can sell.'),
+                            ]),
+                        Tab::make('Pricing')
+                            ->schema([self::plan()]),
 
+                        Tab::make('Upgrades')
+                            ->schema([
+                                // Select input for the products this product can upgrade to (hasmany relationship)
+                                Select::make('upgrades')
+                                    ->label('Upgrades')
+                                    ->relationship('upgrades', 'name', ignoreRecord: true)
+                                    ->multiple()
+                                    ->preload()
+                                    ->placeholder('Select the products that this product can upgrade to'),
                             ]),
                     ]),
             ])->columns(1);
@@ -331,6 +340,28 @@ class ProductResource extends Resource
         return [
             LocationOfferingsRelationManager::class,
         ];
+    }
+
+    public static function providerLocationOptions(?int $serverId): array
+    {
+        if (!$serverId) {
+            return [];
+        }
+
+        return ProviderLocationOffering::query()
+            ->with('locationOption.primaryGroup')
+            ->where('provider_id', $serverId)
+            ->where('enabled', true)
+            ->orderBy('service_type')
+            ->get()
+            ->mapWithKeys(function (ProviderLocationOffering $offering) {
+                $location = $offering->locationOption;
+                $group = $location->primaryGroup?->name;
+                $label = $group ? $group . ' / ' . $location->display_name : $location->display_name;
+
+                return [$offering->id => $label . ' (' . strtoupper($offering->service_type) . ')'];
+            })
+            ->all();
     }
 
     public static function getPages(): array

@@ -52,6 +52,8 @@ class EditServer extends EditRecord
         }
 
         ExtensionHelper::call($record, 'updated', [$record], mayFail: true);
+        $record->unsetRelation('settings');
+        ExtensionHelper::call($record, 'syncLocationOfferings', [$record], mayFail: true);
 
         // Maybe the extension changed the record, so we need to refresh it
         return $record->refresh();

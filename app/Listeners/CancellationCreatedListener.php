@@ -5,6 +5,7 @@ namespace App\Listeners;
 use App\Events\ServiceCancellation\Created;
 use App\Jobs\Server\TerminateJob;
 use App\Models\Service;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
 class CancellationCreatedListener implements ShouldQueue
@@ -15,6 +16,16 @@ class CancellationCreatedListener implements ShouldQueue
     public function handle(Created $event): void
     {
         if ($event->cancellation->type == 'immediate') {
+            if (ProviderOperationLifecycleService::usesDeferredOperations($event->cancellation->service)) {
+                if (in_array($event->cancellation->service->status, [Service::STATUS_ACTIVE, Service::STATUS_SUSPENDED])) {
+                    TerminateJob::dispatch($event->cancellation->service);
+                }
+
+                // A pending create may already have reached the provider. Its poll completion
+                // observes the cancellation and schedules an idempotent delete instead.
+                return;
+            }
+
             if (in_array($event->cancellation->service->status, [Service::STATUS_ACTIVE, Service::STATUS_SUSPENDED])) {
                 TerminateJob::dispatch($event->cancellation->service);
             }

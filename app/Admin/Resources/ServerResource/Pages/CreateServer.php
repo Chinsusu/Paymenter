@@ -49,6 +49,8 @@ class CreateServer extends CreateRecord
         }
 
         ExtensionHelper::call($record, 'enabled', [$record], mayFail: true);
+        $record->unsetRelation('settings');
+        ExtensionHelper::call($record, 'syncLocationOfferings', [$record], mayFail: true);
 
         return $record;
     }

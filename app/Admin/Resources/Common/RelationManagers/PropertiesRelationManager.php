@@ -3,6 +3,7 @@
 namespace App\Admin\Resources\Common\RelationManagers;
 
 use App\Models\CustomProperty;
+use App\Models\Property;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -38,6 +39,7 @@ class PropertiesRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn ($query) => $query->whereNotIn('key', Property::SENSITIVE_KEYS))
             ->recordTitleAttribute('name')
             ->columns([
                 TextColumn::make('name'),

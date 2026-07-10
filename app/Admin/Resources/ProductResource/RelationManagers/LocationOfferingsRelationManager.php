@@ -2,7 +2,7 @@
 
 namespace App\Admin\Resources\ProductResource\RelationManagers;
 
-use App\Models\ProviderLocationOffering;
+use App\Admin\Resources\ProductResource;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -98,21 +98,6 @@ class LocationOfferingsRelationManager extends RelationManager
 
     protected function providerLocationOptions(): array
     {
-        $serverId = $this->getOwnerRecord()->server_id;
-
-        if (!$serverId) {
-            return [];
-        }
-
-        return ProviderLocationOffering::query()
-            ->with('locationOption.primaryGroup')
-            ->where('provider_id', $serverId)
-            ->where('enabled', true)
-            ->get()
-            ->groupBy(fn (ProviderLocationOffering $offering) => $offering->locationOption->primaryGroup?->name ?? 'Other')
-            ->map(fn ($offerings) => $offerings->mapWithKeys(fn (ProviderLocationOffering $offering) => [
-                $offering->id => $offering->locationOption->display_name . ' (' . strtoupper($offering->service_type) . ')',
-            ])->all())
-            ->all();
+        return ProductResource::providerLocationOptions($this->getOwnerRecord()->server_id);
     }
 }

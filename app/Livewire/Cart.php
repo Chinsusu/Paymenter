@@ -11,6 +11,8 @@ use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\Service;
 use App\Models\User;
+use App\Services\LocationAvailabilityService;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Exception;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -197,6 +199,14 @@ class Cart extends Component
                     ]);
                 }
 
+                if (($item->checkout_config['product_location_offering_id'] ?? null) && $service->product->server?->extension === 'HAVProxyIPv4DC') {
+                    LocationAvailabilityService::snapshotProductOffering(
+                        $service,
+                        (int) $item->checkout_config['product_location_offering_id'],
+                        'proxy',
+                    );
+                }
+
                 foreach ($item->config_options as $configOption) {
                     $configOption = (object) $configOption;
                     if (in_array($configOption->option_type, ['text', 'number'])) {
@@ -236,9 +246,11 @@ class Cart extends Component
                     if ($service->product->server) {
                         CreateJob::dispatch($service);
                     }
-                    $service->status = Service::STATUS_ACTIVE;
-                    $service->expires_at = $service->calculateNextDueDate();
-                    $service->save();
+                    if (!ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                        $service->status = Service::STATUS_ACTIVE;
+                        $service->expires_at = $service->calculateNextDueDate();
+                        $service->save();
+                    }
                 }
             }
 

@@ -64,6 +64,10 @@ class Cart
     {
         self::checkRateLimit();
 
+        if ($product->server?->extension === 'HAVProxyIPv4DC' && (int) $quantity !== 1) {
+            throw new DisplayException('HAV Proxy IPv4 DC products must be ordered one proxy per service.');
+        }
+
         // Match on key
         $cart = self::createCart();
         self::ensureCartItemLimit($cart, $key);
@@ -144,6 +148,9 @@ class Cart
     {
         $cart = self::get();
         if ($item = $cart->items()->where('id', $index)->first()) {
+            if ($item->product->server?->extension === 'HAVProxyIPv4DC') {
+                return;
+            }
             if ($item->product->allow_quantity !== 'combined') {
                 return;
             }

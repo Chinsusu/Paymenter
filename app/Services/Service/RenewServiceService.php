@@ -18,8 +18,14 @@ class RenewServiceService
         if ($service->product->server) {
             if ($service->status == Service::STATUS_SUSPENDED) {
                 UnsuspendJob::dispatch($service);
+                if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                    return;
+                }
             } elseif ($service->status == Service::STATUS_PENDING) {
                 CreateJob::dispatch($service);
+                if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                    return;
+                }
             }
         }
 

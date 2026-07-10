@@ -14,6 +14,7 @@ use App\Models\Service;
 use App\Models\ServiceUpgrade;
 use App\Models\Setting;
 use App\Models\Ticket;
+use App\Services\Service\ProviderOperationLifecycleService;
 use App\Services\Service\RenewServiceService;
 use Exception;
 use Illuminate\Console\Command;
@@ -172,6 +173,11 @@ class CronJob extends Command
                 // Suspend orders if due date is overdue for x days
                 Service::where('status', 'active')->where('expires_at', '<', now()->subDays((int) config('settings.cronjob_order_suspend', 2)))->get()->each(function ($service) use (&$number) {
                     SuspendJob::dispatch($service);
+                    if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                        $number++;
+
+                        return;
+                    }
 
                     $service->update(['status' => 'suspended']);
                     $number++;
@@ -184,6 +190,11 @@ class CronJob extends Command
                 // Terminate orders if due date is overdue for x days
                 Service::where('status', 'suspended')->where('expires_at', '<', now()->subDays((int) config('settings.cronjob_order_terminate', 14)))->each(function ($service) use (&$number) {
                     TerminateJob::dispatch($service);
+                    if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                        $number++;
+
+                        return;
+                    }
 
                     $service->update(['status' => 'cancelled']);
                     // Cancel outstanding invoices
