@@ -559,7 +559,10 @@ class ExtensionHelper
 
     protected static function checkServer(Service $service, $action)
     {
-        $server = $service->product->server;
+        $providerServerId = (int) $service->properties()
+            ->where('key', 'provider_server_id')
+            ->value('value');
+        $server = $providerServerId ? Server::find($providerServerId) : $service->product->server;
 
         if (!$server) {
             throw new Exception('No server assigned to this product');
@@ -614,6 +617,38 @@ class ExtensionHelper
             self::getServiceProperties($service),
             $action,
             $operationId,
+        );
+    }
+
+    /**
+     * Clear provider operation state only after the local lifecycle transition succeeds.
+     */
+    public static function finalizeServerOperation(Service $service, string $action, ?string $operationId = null): void
+    {
+        $server = self::checkServer($service, 'finalizeOperation');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        $extension->finalizeOperation($service, $action, $operationId);
+    }
+
+    public static function handoffServerOperationToDelete(Service $service, string $action, ?string $operationId = null): void
+    {
+        $server = self::checkServer($service, 'handoffOperationToDelete');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        $extension->handoffOperationToDelete($service, $action, $operationId);
+    }
+
+    public static function recoverServerOperationWithoutId(Service $service, string $action): array
+    {
+        $server = self::checkServer($service, 'recoverOperationWithoutId');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        return $extension->recoverOperationWithoutId(
+            $service,
+            self::settingsToArray($service->product->settings),
+            self::getServiceProperties($service),
+            $action,
         );
     }
 

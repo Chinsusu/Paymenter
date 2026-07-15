@@ -15,7 +15,12 @@ class RenewServiceService
      */
     public function handle(Service $service)
     {
-        if ($service->product->server) {
+        $service->refresh();
+        if ($service->status === Service::STATUS_CANCELLED || $service->cancellation?->type === 'immediate') {
+            return;
+        }
+
+        if ($service->product->server || ProviderOperationLifecycleService::usesDeferredOperations($service)) {
             if ($service->status == Service::STATUS_SUSPENDED) {
                 UnsuspendJob::dispatch($service);
                 if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {

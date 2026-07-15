@@ -73,17 +73,26 @@ class LocationAvailabilityService
     public static function snapshotSelection(Service $service, int|ProviderLocationOffering $providerLocationOffering): array
     {
         $offering = $providerLocationOffering instanceof ProviderLocationOffering
-            ? $providerLocationOffering->loadMissing('locationOption', 'targets')
-            : ProviderLocationOffering::with(['locationOption', 'targets'])->findOrFail($providerLocationOffering);
+            ? $providerLocationOffering->loadMissing('provider', 'locationOption', 'targets')
+            : ProviderLocationOffering::with(['provider', 'locationOption', 'targets'])->findOrFail($providerLocationOffering);
 
         $target = self::resolveTarget($offering);
 
         $snapshot = [
+            'provider_server_id' => (string) $offering->provider_id,
+            'provider_extension' => (string) $offering->provider?->extension,
             'location_option_id' => (string) $offering->location_option_id,
             'provider_location_offering_id' => (string) $offering->id,
             'external_location_code' => (string) ($target?->external_location_code ?? $target?->external_location_id ?? ''),
             'display_name' => $offering->locationOption->display_name,
         ];
+
+        $productSettings = $service->product->settings()
+            ->whereIn('key', ['protocol', 'speed_limit_mbps', 'bandwidth_limit_mb'])
+            ->pluck('value', 'key');
+        foreach ($productSettings as $key => $value) {
+            $snapshot['hav_proxy_ipv4_dc_' . $key] = (string) $value;
+        }
 
         foreach ($snapshot as $key => $value) {
             $service->properties()->updateOrCreate([
@@ -121,7 +130,7 @@ class LocationAvailabilityService
         if ($serviceType && $providerOffering->service_type !== $serviceType) {
             throw new Exception('Selected location is not available for this service type.');
         }
-        if (!$providerOffering->enabled || $providerOffering->stock_state === ProviderLocationOffering::STOCK_UNAVAILABLE) {
+        if (!$providerOffering->isSellable()) {
             throw new Exception('Selected location is out of stock.');
         }
 
@@ -136,6 +145,8 @@ class LocationAvailabilityService
     public static function checkoutOptionsForProduct(int|Product $product, ?string $serviceType = null): array
     {
         return self::forProduct($product, $serviceType)
+            ->filter(fn (ProductLocationOffering $productOffering) => $productOffering->providerLocationOffering->isSellable())
+            ->filter(fn (ProductLocationOffering $productOffering) => self::resolveTarget($productOffering->providerLocationOffering) !== null)
             ->mapWithKeys(function (ProductLocationOffering $productOffering) {
                 $providerOffering = $productOffering->providerLocationOffering;
                 $location = $providerOffering->locationOption;

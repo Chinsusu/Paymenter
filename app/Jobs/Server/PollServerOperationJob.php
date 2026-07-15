@@ -3,6 +3,7 @@
 namespace App\Jobs\Server;
 
 use App\Helpers\ExtensionHelper;
+use App\Jobs\Server\Concerns\SerializesProviderService;
 use App\Models\Service;
 use App\Services\Service\ProviderOperationLifecycleService;
 use DateTimeImmutable;
@@ -16,11 +17,13 @@ use Illuminate\Queue\SerializesModels;
 
 class PollServerOperationJob implements ShouldBeUnique, ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels, SerializesProviderService;
 
-    public $timeout = 30;
+    public $timeout = 45;
 
     public $tries = 1000;
+
+    public $uniqueFor = 300;
 
     public function __construct(
         public int $serviceId,
@@ -53,12 +56,16 @@ class PollServerOperationJob implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
-            throw $exception;
+            $this->fail($exception);
+
+            return;
         }
 
         if (ProviderOperationLifecycleService::isPending($result)) {
             if (time() >= $this->deadlineTimestamp) {
-                throw new Exception(sprintf('Timed out waiting for provider %s operation %s.', $this->action, $this->operationId));
+                $this->fail(new Exception(sprintf('Timed out waiting for provider %s operation %s.', $this->action, $this->operationId)));
+
+                return;
             }
 
             $this->release(max(1, (int) ($result['provider_poll_interval'] ?? 2)));
@@ -66,6 +73,12 @@ class PollServerOperationJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        ProviderOperationLifecycleService::complete($service, $this->action, $this->sendNotification, is_array($result) ? $result : []);
+        ProviderOperationLifecycleService::complete(
+            $service,
+            $this->action,
+            $this->sendNotification,
+            is_array($result) ? $result : [],
+            $this->operationId,
+        );
     }
 }

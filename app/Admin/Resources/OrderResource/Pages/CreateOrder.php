@@ -6,6 +6,7 @@ use App\Admin\Resources\OrderResource;
 use App\Models\Invoice;
 use App\Models\ProviderLocationOffering;
 use App\Services\LocationAvailabilityService;
+use Exception;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateOrder extends CreateRecord
@@ -45,6 +46,10 @@ class CreateOrder extends CreateRecord
             $productLocationOfferingId = $serviceData['product_location_offering_id'] ?? null;
 
             if (!$productLocationOfferingId) {
+                if ($service->product?->server?->extension === 'HAVProxyIPv4DC') {
+                    throw new Exception('Location is required for HAV Proxy IPv4 DC services.');
+                }
+
                 continue;
             }
 

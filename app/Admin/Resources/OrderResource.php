@@ -8,12 +8,15 @@ use App\Admin\Resources\OrderResource\Pages\EditOrder;
 use App\Admin\Resources\OrderResource\Pages\ListOrders;
 use App\Admin\Resources\OrderResource\RelationManagers\ServiceRelationManager;
 use App\Helpers\ExtensionHelper;
+use App\Jobs\Server\TerminateJob;
 use App\Models\Currency;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductLocationOffering;
 use App\Models\ProviderLocationOffering;
+use App\Models\Service;
 use App\Services\LocationAvailabilityService;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -32,6 +35,7 @@ use Filament\Support\RawJs;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class OrderResource extends Resource
 {
@@ -66,6 +70,8 @@ class OrderResource extends Resource
                 Repeater::make('services')
                     ->relationship('services')
                     ->label('Services')
+                    ->addable(fn (?Order $record) => $record === null)
+                    ->deletable(fn (?Order $record) => $record === null)
                     ->columnSpanFull()
                     ->columns(2)
                     ->mutateRelationshipDataBeforeCreateUsing(function (array $data): array {
@@ -90,9 +96,13 @@ class OrderResource extends Resource
                             ->searchable()
                             ->preload()
                             ->live()
-                            ->afterStateUpdated(function (Set $set) {
+                            ->disabled(fn (?Service $record) => $record && ProviderOperationLifecycleService::usesDeferredOperations($record))
+                            ->afterStateUpdated(function (Set $set, $state) {
                                 $set('plan_id', null);
                                 $set('product_location_offering_id', null);
+                                if (self::isHavProxyProduct((int) $state)) {
+                                    $set('quantity', 1);
+                                }
                             })
                             ->placeholder('Select the product'),
                         Select::make('product_location_offering_id')
@@ -100,8 +110,12 @@ class OrderResource extends Resource
                             ->options(fn (Get $get) => self::productLocationOptions($get('product_id')))
                             ->searchable()
                             ->preload()
-                            ->hidden(fn (Get $get) => self::productLocationOptions($get('product_id')) === [])
-                            ->required(fn (Get $get) => self::productLocationOptions($get('product_id')) !== [])
+                            ->hidden(fn (?Service $record, Get $get) => $record || (!self::isHavProxyProduct($get('product_id')) && self::productLocationOptions($get('product_id')) === []))
+                            ->disabled(fn (Get $get) => self::isHavProxyProduct($get('product_id')) && self::productLocationOptions($get('product_id')) === [])
+                            ->required(fn (Get $get) => self::isHavProxyProduct($get('product_id')) || self::productLocationOptions($get('product_id')) !== [])
+                            ->helperText(fn (Get $get) => self::isHavProxyProduct($get('product_id')) && self::productLocationOptions($get('product_id')) === []
+                                ? 'No provider location is currently available.'
+                                : null)
                             ->placeholder('Select the location'),
                         Select::make('plan_id')
                             ->label('Plan')
@@ -126,6 +140,11 @@ class OrderResource extends Resource
                         TextInput::make('quantity')
                             ->label('Quantity')
                             ->required()
+                            ->numeric()
+                            ->integer()
+                            ->minValue(1)
+                            ->maxValue(fn (?Service $record, Get $get) => ($record && ProviderOperationLifecycleService::usesDeferredOperations($record)) || self::isHavProxyProduct($get('product_id')) ? 1 : null)
+                            ->disabled(fn (?Service $record) => $record && ProviderOperationLifecycleService::usesDeferredOperations($record))
                             ->placeholder('Enter the quantity'),
                         TextInput::make('price')
                             ->suffix(fn (Component $component, Get $get) => $component->getRecord()?->currency->suffix ?? Currency::where('code', $get('../../currency_code'))->first()?->suffix)
@@ -179,7 +198,7 @@ class OrderResource extends Resource
         }
 
         return LocationAvailabilityService::forProduct($product, ProviderLocationOffering::SERVICE_PROXY)
-            ->filter(fn (ProductLocationOffering $offering) => $offering->providerLocationOffering->stock_state !== ProviderLocationOffering::STOCK_UNAVAILABLE)
+            ->filter(fn (ProductLocationOffering $offering) => $offering->providerLocationOffering->isSellable())
             ->filter(fn (ProductLocationOffering $offering) => LocationAvailabilityService::resolveTarget($offering->providerLocationOffering) !== null)
             ->mapWithKeys(function (ProductLocationOffering $offering) {
                 $location = $offering->providerLocationOffering->locationOption;
@@ -189,6 +208,13 @@ class OrderResource extends Resource
                 return [$offering->id => $label];
             })
             ->all();
+    }
+
+    public static function isHavProxyProduct(?int $productId): bool
+    {
+        return $productId
+            ? Product::query()->whereKey($productId)->whereHas('server', fn ($query) => $query->where('extension', 'HAVProxyIPv4DC'))->exists()
+            : false;
     }
 
     public static function table(Table $table): Table
@@ -225,7 +251,25 @@ class OrderResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action): void {
+                            $providerServices = $records
+                                ->load('services')
+                                ->pluck('services')
+                                ->flatten()
+                                ->filter(fn (Service $service) => $service->status !== Service::STATUS_CANCELLED
+                                    && ProviderOperationLifecycleService::usesDeferredOperations($service));
+                            if ($providerServices->isEmpty()) {
+                                return;
+                            }
+
+                            $providerServices->each(fn (Service $service) => TerminateJob::dispatch($service));
+                            Notification::make('Provider terminations queued')
+                                ->title('Delete these orders again after their services reach cancelled status.')
+                                ->warning()
+                                ->send();
+                            $action->halt();
+                        }),
                 ]),
             ]);
     }

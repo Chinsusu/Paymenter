@@ -17,12 +17,21 @@ class CancellationCreatedListener implements ShouldQueue
     {
         if ($event->cancellation->type == 'immediate') {
             if (ProviderOperationLifecycleService::usesDeferredOperations($event->cancellation->service)) {
-                if (in_array($event->cancellation->service->status, [Service::STATUS_ACTIVE, Service::STATUS_SUSPENDED])) {
+                $service = $event->cancellation->service;
+                $hasProviderWork = $service->properties()
+                    ->whereIn('key', [
+                        'hav_proxy_ipv4_dc_proxy_id',
+                        'hav_proxy_ipv4_dc_pending_action',
+                        'hav_proxy_ipv4_dc_pending_operation_id',
+                    ])
+                    ->exists();
+
+                if ($hasProviderWork || in_array($service->status, [Service::STATUS_ACTIVE, Service::STATUS_SUSPENDED], true)) {
                     TerminateJob::dispatch($event->cancellation->service);
+                } else {
+                    ProviderOperationLifecycleService::terminate($service);
                 }
 
-                // A pending create may already have reached the provider. Its poll completion
-                // observes the cancellation and schedules an idempotent delete instead.
                 return;
             }
 

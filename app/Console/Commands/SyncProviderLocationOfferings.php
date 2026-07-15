@@ -21,6 +21,7 @@ class SyncProviderLocationOfferings extends Command
             ->get();
 
         $synced = 0;
+        $failed = false;
         foreach ($servers as $server) {
             if (!ExtensionHelper::hasFunction($server, 'syncLocationOfferings')) {
                 continue;
@@ -31,12 +32,20 @@ class SyncProviderLocationOfferings extends Command
                 $synced += $count;
                 $this->line(sprintf('%s: %s location offerings synchronized.', $server->name, $count));
             } catch (Exception $exception) {
+                $failed = true;
+                if (ExtensionHelper::hasFunction($server, 'markLocationOfferingsUnavailable')) {
+                    try {
+                        ExtensionHelper::call($server, 'markLocationOfferingsUnavailable', [$server]);
+                    } catch (Exception $markException) {
+                        report($markException);
+                    }
+                }
                 $this->error(sprintf('%s: %s', $server->name, $exception->getMessage()));
             }
         }
 
         $this->info(sprintf('Synchronized %s provider location offerings.', $synced));
 
-        return self::SUCCESS;
+        return $failed ? self::FAILURE : self::SUCCESS;
     }
 }
