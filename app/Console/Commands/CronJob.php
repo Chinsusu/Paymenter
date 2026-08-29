@@ -14,6 +14,8 @@ use App\Models\Service;
 use App\Models\ServiceUpgrade;
 use App\Models\Setting;
 use App\Models\Ticket;
+use App\Services\Invoice\InvoicePaymentFailureNotifier;
+use App\Services\Service\ProviderOperationLifecycleService;
 use App\Services\Service\RenewServiceService;
 use Exception;
 use Illuminate\Console\Command;
@@ -41,7 +43,7 @@ class CronJob extends Command
     /**
      * Execute the console command.
      */
-    public function handle()
+    public function handle(InvoicePaymentFailureNotifier $paymentFailureNotifier)
     {
         Config::set('audit.console', true);
 
@@ -49,8 +51,8 @@ class CronJob extends Command
 
         try {
             // Send invoices if due date is x days away
-            $this->runCronJob('invoices_created', function ($number = 0) {
-                Service::where('status', 'active')->where('expires_at', '<', now()->addDays((int) config('settings.cronjob_invoice', 7)))->get()->each(function ($service) use (&$number) {
+            $this->runCronJob('invoices_created', function ($number = 0) use ($paymentFailureNotifier) {
+                Service::where('status', 'active')->where('expires_at', '<', now()->addDays((int) config('settings.cronjob_invoice', 7)))->get()->each(function ($service) use (&$number, $paymentFailureNotifier) {
                     // Does the service have already a pending invoice?
                     if ($service->invoices()->where('status', 'pending')->exists() || $service->cancellation()->exists()) {
                         return;
@@ -99,7 +101,7 @@ class CronJob extends Command
 
                     // Charge billing agreements
                     if ($service->billing_agreement_id && $invoice->fresh()->status === 'pending') {
-                        DB::afterCommit(function () use ($invoice, $service) {
+                        DB::afterCommit(function () use ($invoice, $service, $paymentFailureNotifier) {
                             try {
                                 ExtensionHelper::charge(
                                     $service->billingAgreement->gateway,
@@ -110,7 +112,7 @@ class CronJob extends Command
                                 $this->successFullCharges++;
                             } catch (Exception $e) {
                                 // Ignore errors here
-                                NotificationHelper::invoicePaymentFailedNotification($invoice->user, $invoice);
+                                $paymentFailureNotifier->notifyOnce($invoice);
                             }
                         });
                     }
@@ -172,6 +174,11 @@ class CronJob extends Command
                 // Suspend orders if due date is overdue for x days
                 Service::where('status', 'active')->where('expires_at', '<', now()->subDays((int) config('settings.cronjob_order_suspend', 2)))->get()->each(function ($service) use (&$number) {
                     SuspendJob::dispatch($service);
+                    if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                        $number++;
+
+                        return;
+                    }
 
                     $service->update(['status' => 'suspended']);
                     $number++;
@@ -184,6 +191,11 @@ class CronJob extends Command
                 // Terminate orders if due date is overdue for x days
                 Service::where('status', 'suspended')->where('expires_at', '<', now()->subDays((int) config('settings.cronjob_order_terminate', 14)))->each(function ($service) use (&$number) {
                     TerminateJob::dispatch($service);
+                    if (ProviderOperationLifecycleService::usesDeferredOperations($service)) {
+                        $number++;
+
+                        return;
+                    }
 
                     $service->update(['status' => 'cancelled']);
                     // Cancel outstanding invoices

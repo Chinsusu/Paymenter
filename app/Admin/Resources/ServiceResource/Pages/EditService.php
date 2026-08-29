@@ -5,8 +5,12 @@ namespace App\Admin\Resources\ServiceResource\Pages;
 use App\Admin\Actions\AuditAction;
 use App\Admin\Resources\ServiceResource;
 use App\Helpers\ExtensionHelper;
-use App\Helpers\NotificationHelper;
+use App\Jobs\Server\CreateJob;
+use App\Jobs\Server\SuspendJob;
+use App\Jobs\Server\TerminateJob;
+use App\Jobs\Server\UnsuspendJob;
 use App\Models\Service;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Exception;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -24,7 +28,8 @@ class EditService extends EditRecord
         return [
             DeleteAction::make()
                 ->form(function (DeleteAction $action) {
-                    $status = !in_array($this->record->status, [Service::STATUS_PENDING, Service::STATUS_CANCELLED]) && $this->record->product->server_id !== null;
+                    $status = $this->record->status !== Service::STATUS_CANCELLED
+                        && ($this->record->product->server_id !== null || ProviderOperationLifecycleService::usesDeferredOperations($this->record));
                     if (!$status) {
                         return [];
                     }
@@ -36,6 +41,16 @@ class EditService extends EditRecord
                     ];
                 })
                 ->action(function (array $data, Service $record): void {
+                    if (ProviderOperationLifecycleService::usesDeferredOperations($record) && $record->status !== Service::STATUS_CANCELLED) {
+                        TerminateJob::dispatch($record);
+                        Notification::make('Termination queued')
+                            ->title('Provider deletion was queued before removing the service record.')
+                            ->warning()
+                            ->send();
+
+                        return;
+                    }
+
                     try {
                         if (($data['deleteExtensionServer'] ?? false)) {
                             ExtensionHelper::terminateServer($record);
@@ -69,26 +84,13 @@ class EditService extends EditRecord
                 ])
                 ->action(function (array $data, Service $record, Action $action): void {
                     try {
-                        switch ($data['action']) {
-                            case 'create':
-                                $sdata = ExtensionHelper::createServer($record);
-                                if ($data['sendNotification']) {
-                                    NotificationHelper::serverCreatedNotification($record->order->user, $record, $sdata);
-                                }
-                                break;
-                            case 'suspend':
-                                $sdata = ExtensionHelper::suspendServer($record);
-                                break;
-                            case 'unsuspend':
-                                $sdata = ExtensionHelper::unsuspendServer($record);
-                                break;
-                            case 'terminate':
-                                $sdata = ExtensionHelper::terminateServer($record);
-                                break;
-                            case 'upgrade':
-                                $sdata = ExtensionHelper::upgradeServer($record);
-                                break;
-                        }
+                        match ($data['action']) {
+                            'create' => CreateJob::dispatch($record, (bool) ($data['sendNotification'] ?? false)),
+                            'suspend' => SuspendJob::dispatch($record, (bool) ($data['sendNotification'] ?? false)),
+                            'unsuspend' => UnsuspendJob::dispatch($record, (bool) ($data['sendNotification'] ?? false)),
+                            'terminate' => TerminateJob::dispatch($record, (bool) ($data['sendNotification'] ?? false)),
+                            'upgrade' => ExtensionHelper::upgradeServer($record),
+                        };
                     } catch (Exception $e) {
                         if (config('app.debug')) {
                             throw $e;

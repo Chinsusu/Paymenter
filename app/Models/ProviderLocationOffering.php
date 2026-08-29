@@ -25,6 +25,11 @@ class ProviderLocationOffering extends Model implements Auditable
 
     public const STOCK_UNAVAILABLE = 'unavailable';
 
+    public const SELLABLE_STOCK_STATES = [
+        self::STOCK_AVAILABLE,
+        self::STOCK_LIMITED,
+    ];
+
     protected $guarded = [];
 
     protected $casts = [
@@ -32,6 +37,11 @@ class ProviderLocationOffering extends Model implements Auditable
         'capabilities' => 'array',
         'last_synced_at' => 'datetime',
     ];
+
+    public function isSellable(): bool
+    {
+        return $this->enabled && in_array($this->stock_state, self::SELLABLE_STOCK_STATES, true);
+    }
 
     public function provider(): BelongsTo
     {

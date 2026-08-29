@@ -9,9 +9,15 @@ use App\Http\Requests\Api\Admin\Services\GetServiceRequest;
 use App\Http\Requests\Api\Admin\Services\GetServicesRequest;
 use App\Http\Requests\Api\Admin\Services\UpdateServiceRequest;
 use App\Http\Resources\ServiceResource;
+use App\Jobs\Server\TerminateJob;
+use App\Models\ProviderLocationOffering;
 use App\Models\Service;
+use App\Services\LocationAvailabilityService;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\QueryParameter;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 use Spatie\QueryBuilder\QueryBuilder;
 
 #[Group(name: 'Services', weight: 3)]
@@ -49,8 +55,26 @@ class ServiceController extends ApiController
      */
     public function store(CreateServiceRequest $request)
     {
-        // Validate and create the service
-        $service = Service::create($request->validated());
+        $service = DB::transaction(function () use ($request) {
+            $data = $request->validated();
+            $productLocationOfferingId = Arr::pull($data, 'product_location_offering_id');
+            $service = Service::create($data);
+
+            if ($service->product?->server?->extension === 'HAVProxyIPv4DC') {
+                $service->properties()->create([
+                    'key' => 'product_location_offering_id',
+                    'name' => 'Product location offering ID',
+                    'value' => (string) $productLocationOfferingId,
+                ]);
+                LocationAvailabilityService::snapshotProductOffering(
+                    $service,
+                    (int) $productLocationOfferingId,
+                    ProviderLocationOffering::SERVICE_PROXY,
+                );
+            }
+
+            return $service;
+        });
 
         // Return the created service as a JSON response
         return new ServiceResource($service);
@@ -86,6 +110,14 @@ class ServiceController extends ApiController
      */
     public function destroy(DeleteServiceRequest $request, Service $service)
     {
+        if (ProviderOperationLifecycleService::usesDeferredOperations($service) && $service->status !== Service::STATUS_CANCELLED) {
+            TerminateJob::dispatch($service);
+
+            return response()->json([
+                'message' => 'Provider termination was queued. Delete the service after it reaches cancelled status.',
+            ], 202);
+        }
+
         // Delete the service
         $service->delete();
 

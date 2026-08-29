@@ -9,7 +9,10 @@ use App\Http\Requests\Api\Admin\Orders\GetOrderRequest;
 use App\Http\Requests\Api\Admin\Orders\GetOrdersRequest;
 use App\Http\Requests\Api\Admin\Orders\UpdateOrderRequest;
 use App\Http\Resources\OrderResource;
+use App\Jobs\Server\TerminateJob;
 use App\Models\Order;
+use App\Models\Service;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\QueryParameter;
 use Spatie\QueryBuilder\QueryBuilder;
@@ -82,6 +85,17 @@ class OrderController extends ApiController
      */
     public function destroy(DeleteOrderRequest $request, Order $order)
     {
+        $providerServices = $order->services
+            ->filter(fn (Service $service) => $service->status !== Service::STATUS_CANCELLED
+                && ProviderOperationLifecycleService::usesDeferredOperations($service));
+        if ($providerServices->isNotEmpty()) {
+            $providerServices->each(fn (Service $service) => TerminateJob::dispatch($service));
+
+            return response()->json([
+                'message' => 'Provider terminations were queued. Delete the order after its services reach cancelled status.',
+            ], 202);
+        }
+
         // Delete the order
         $order->delete();
 

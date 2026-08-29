@@ -6,6 +6,7 @@ use App\Admin\Actions\AuditAction;
 use App\Admin\Resources\ProductResource;
 use App\Helpers\ExtensionHelper;
 use App\Models\Product;
+use App\Models\ProductLocationOffering;
 use App\Models\Server;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -89,12 +90,23 @@ class EditProduct extends EditRecord
             $data['settings'][$setting->key] = $setting->value;
         }
 
+        $data['product_location_offering_ids'] = $this->record
+            ->locationOfferings()
+            ->pluck('provider_location_offering_id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
         return $data;
     }
 
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
-        $record->update(Arr::except($data, ['settings']));
+        if (array_key_exists('server_id', $data) && (int) $data['server_id'] !== (int) $record->server_id && $record->services()->exists()) {
+            throw new \Exception('Cannot change the provider after this product has active service history. Create a new product instead.');
+        }
+
+        $record->update(Arr::except($data, ['settings', 'product_location_offering_ids']));
+        $this->syncLocationOfferings($record, $data['product_location_offering_ids'] ?? []);
 
         if (!isset($data['settings'])) {
             return $record;
@@ -122,5 +134,24 @@ class EditProduct extends EditRecord
         ]);
 
         return $record;
+    }
+
+    private function syncLocationOfferings(Model $record, array $providerLocationOfferingIds): void
+    {
+        $providerLocationOfferingIds = array_values(array_filter($providerLocationOfferingIds));
+
+        $record->locationOfferings()
+            ->whereNotIn('provider_location_offering_id', $providerLocationOfferingIds ?: [0])
+            ->delete();
+
+        foreach ($providerLocationOfferingIds as $index => $providerLocationOfferingId) {
+            ProductLocationOffering::updateOrCreate([
+                'product_id' => $record->id,
+                'provider_location_offering_id' => $providerLocationOfferingId,
+            ], [
+                'enabled' => true,
+                'sort_order' => $index,
+            ]);
+        }
     }
 }

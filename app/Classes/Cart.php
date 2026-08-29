@@ -6,6 +6,9 @@ use App\Exceptions\DisplayException;
 use App\Models\Coupon;
 use App\Models\Plan;
 use App\Models\Product;
+use App\Models\ProductLocationOffering;
+use App\Models\ProviderLocationOffering;
+use App\Models\ProviderLocationTarget;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\RateLimiter;
@@ -63,6 +66,29 @@ class Cart
     public static function add(Product $product, Plan $plan, $configOptions, $checkoutConfig, $quantity = 1, $key = null)
     {
         self::checkRateLimit();
+
+        if ($product->server?->extension === 'HAVProxyIPv4DC') {
+            if ((int) $quantity !== 1) {
+                throw new DisplayException('HAV Proxy IPv4 DC products must be ordered one proxy per service.');
+            }
+
+            $locationOfferingId = (int) (((array) $checkoutConfig)['product_location_offering_id'] ?? 0);
+            $locationAvailable = $locationOfferingId > 0 && ProductLocationOffering::query()
+                ->whereKey($locationOfferingId)
+                ->where('product_id', $product->id)
+                ->where('enabled', true)
+                ->whereHas('providerLocationOffering', fn ($query) => $query
+                    ->where('provider_id', $product->server_id)
+                    ->where('service_type', ProviderLocationOffering::SERVICE_PROXY)
+                    ->where('enabled', true)
+                    ->whereIn('stock_state', ProviderLocationOffering::SELLABLE_STOCK_STATES)
+                    ->whereHas('targets', fn ($query) => $query->where('status', ProviderLocationTarget::STATUS_ACTIVE)))
+                ->exists();
+
+            if (!$locationAvailable) {
+                throw new DisplayException('The selected proxy location is unavailable.');
+            }
+        }
 
         // Match on key
         $cart = self::createCart();
@@ -144,6 +170,9 @@ class Cart
     {
         $cart = self::get();
         if ($item = $cart->items()->where('id', $index)->first()) {
+            if ($item->product->server?->extension === 'HAVProxyIPv4DC') {
+                return;
+            }
             if ($item->product->allow_quantity !== 'combined') {
                 return;
             }

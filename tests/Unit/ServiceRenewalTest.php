@@ -149,4 +149,37 @@ class ServiceRenewalTest extends TestCase
 
         $this->assertTrue($service->expires_at >= now()->addMonth()->addDay(-1)); // 30 days from now minus a few seconds for processing time
     }
+
+    public function test_late_payment_does_not_reactivate_a_cancelled_service(): void
+    {
+        $user = User::factory()->create();
+        $product = $this->createProduct();
+        $service = Service::factory()->create([
+            'user_id' => $user->id,
+            'plan_id' => $product->plan->id,
+            'product_id' => $product->product->id,
+            'status' => Service::STATUS_CANCELLED,
+            'expires_at' => now()->subDay(),
+            'currency_code' => 'USD',
+            'price' => 10.00,
+        ]);
+        $originalExpiry = $service->expires_at->toDateString();
+        $invoice = Invoice::factory()->create([
+            'user_id' => $user->id,
+            'status' => 'pending',
+            'currency_code' => 'USD',
+        ]);
+        $invoice->items()->create([
+            'reference_id' => $service->id,
+            'reference_type' => Service::class,
+            'description' => 'Late payment',
+            'quantity' => 1,
+            'price' => 10.00,
+        ]);
+
+        $invoice->transactions()->create(['amount' => 10.00]);
+
+        $this->assertSame(Service::STATUS_CANCELLED, $service->fresh()->status);
+        $this->assertSame($originalExpiry, $service->fresh()->expires_at->toDateString());
+    }
 }

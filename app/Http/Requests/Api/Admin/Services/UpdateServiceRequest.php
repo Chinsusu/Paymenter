@@ -4,6 +4,8 @@ namespace App\Http\Requests\Api\Admin\Services;
 
 use App\Http\Requests\Api\Admin\AdminApiRequest;
 use App\Models\Plan;
+use App\Models\Product;
+use App\Services\Service\ProviderOperationLifecycleService;
 
 class UpdateServiceRequest extends AdminApiRequest
 {
@@ -11,8 +13,22 @@ class UpdateServiceRequest extends AdminApiRequest
 
     public function rules(): array
     {
+        $service = $this->route('service');
+        $targetProduct = Product::with('server')->find($this->input('product_id', $service?->product_id));
+        $currentIsHavProxy = $service && ProviderOperationLifecycleService::usesDeferredOperations($service);
+        $targetIsHavProxy = $targetProduct?->server?->extension === 'HAVProxyIPv4DC';
+
         return [
-            'product_id' => 'sometimes|required|exists:products,id',
+            'product_id' => [
+                'sometimes',
+                'required',
+                'exists:products,id',
+                function ($attribute, $value, $fail) use ($service, $currentIsHavProxy, $targetIsHavProxy) {
+                    if ($service && (int) $value !== (int) $service->product_id && ($currentIsHavProxy || $targetIsHavProxy)) {
+                        $fail('The product cannot be changed for a provider-snapshotted service.');
+                    }
+                },
+            ],
             'plan_id' => [
                 'sometimes',
                 'required',
@@ -29,11 +45,20 @@ class UpdateServiceRequest extends AdminApiRequest
             /**
              * @default 1
              */
-            'quantity' => 'sometimes|required|integer|min:1',
+            'quantity' => array_filter(['sometimes', 'required', 'integer', 'min:1', ($currentIsHavProxy || $targetIsHavProxy) ? 'max:1' : null]),
             /**
              * @default pending
              */
-            'status' => 'sometimes|required|in:pending,active,cancelled,suspended',
+            'status' => [
+                'sometimes',
+                'required',
+                'in:pending,active,cancelled,suspended',
+                function ($attribute, $value, $fail) use ($service, $currentIsHavProxy) {
+                    if ($service && $currentIsHavProxy && $value !== $service->status) {
+                        $fail('Use provider actions to change the status of this service.');
+                    }
+                },
+            ],
             'expires_at' => 'sometimes|nullable|date|after_or_equal:today',
             /**
              * @example USD

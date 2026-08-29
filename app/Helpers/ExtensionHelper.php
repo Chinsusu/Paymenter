@@ -547,10 +547,10 @@ class ExtensionHelper
     public static function getServiceProperties(Service $service)
     {
         $properties = [];
-        foreach ($service->properties as $property) {
+        foreach ($service->properties()->get() as $property) {
             $properties[$property->key] = $property->value;
         }
-        foreach ($service->configs as $config) {
+        foreach ($service->configs()->with(['configOption', 'configValue'])->get() as $config) {
             $properties[$config->configOption->env_variable] = $config->configValue->env_variable ?? $config->configValue->name;
         }
 
@@ -559,7 +559,10 @@ class ExtensionHelper
 
     protected static function checkServer(Service $service, $action)
     {
-        $server = $service->product->server;
+        $providerServerId = (int) $service->properties()
+            ->where('key', 'provider_server_id')
+            ->value('value');
+        $server = $providerServerId ? Server::find($providerServerId) : $service->product->server;
 
         if (!$server) {
             throw new Exception('No server assigned to this product');
@@ -594,6 +597,59 @@ class ExtensionHelper
         self::recordAudit($service, 'extension_action', [], ['action' => 'create_server']);
 
         return self::getExtension('server', $server->extension, $server->settings)->createServer($service, self::settingsToArray($service->product->settings), self::getServiceProperties($service));
+    }
+
+    /**
+     * Poll a provider operation without holding a queue worker while it remains pending.
+     */
+    public static function pollServerOperation(Service $service, string $action, string $operationId)
+    {
+        $server = self::checkServer($service, 'pollOperation');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        if (!method_exists($extension, 'pollOperation')) {
+            throw new Exception('Server does not support provider operation polling.');
+        }
+
+        return $extension->pollOperation(
+            $service,
+            self::settingsToArray($service->product->settings),
+            self::getServiceProperties($service),
+            $action,
+            $operationId,
+        );
+    }
+
+    /**
+     * Clear provider operation state only after the local lifecycle transition succeeds.
+     */
+    public static function finalizeServerOperation(Service $service, string $action, ?string $operationId = null): void
+    {
+        $server = self::checkServer($service, 'finalizeOperation');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        $extension->finalizeOperation($service, $action, $operationId);
+    }
+
+    public static function handoffServerOperationToDelete(Service $service, string $action, ?string $operationId = null): void
+    {
+        $server = self::checkServer($service, 'handoffOperationToDelete');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        $extension->handoffOperationToDelete($service, $action, $operationId);
+    }
+
+    public static function recoverServerOperationWithoutId(Service $service, string $action): array
+    {
+        $server = self::checkServer($service, 'recoverOperationWithoutId');
+        $extension = self::getExtension('server', $server->extension, $server->settings);
+
+        return $extension->recoverOperationWithoutId(
+            $service,
+            self::settingsToArray($service->product->settings),
+            self::getServiceProperties($service),
+            $action,
+        );
     }
 
     /**

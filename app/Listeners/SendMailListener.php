@@ -14,9 +14,12 @@ use App\Events\User\Created as UserCreated;
 use App\Helpers\NotificationHelper;
 use App\Models\Session;
 use App\Models\UserAuthenticationLog;
+use App\Services\Invoice\InvoicePaymentFailureNotifier;
 
 class SendMailListener
 {
+    public function __construct(private readonly InvoicePaymentFailureNotifier $paymentFailureNotifier) {}
+
     /**
      * Handle the event.
      */
@@ -32,11 +35,15 @@ class SendMailListener
             NotificationHelper::invoiceCreatedNotification($invoice->user, $invoice);
         } elseif ($event instanceof InvoicePaid) {
             NotificationHelper::invoicePaidNotification($event->invoice->user, $event->invoice);
-        } elseif ($event instanceof InvoiceTransactionCreated || $event instanceof InvoiceTransactionUpdated) {
-            // Check if status is failed
+        } elseif ($event instanceof InvoiceTransactionCreated) {
             $transaction = $event->invoiceTransaction;
             if ($transaction->status === InvoiceTransactionStatus::Failed) {
-                NotificationHelper::invoicePaymentFailedNotification($transaction->invoice->user, $transaction->invoice);
+                $this->paymentFailureNotifier->notifyOnce($transaction->invoice);
+            }
+        } elseif ($event instanceof InvoiceTransactionUpdated) {
+            $transaction = $event->invoiceTransaction;
+            if ($transaction->wasChanged('status') && $transaction->status === InvoiceTransactionStatus::Failed) {
+                $this->paymentFailureNotifier->notifyOnce($transaction->invoice);
             }
         } elseif ($event instanceof UserCreated) {
             $user = $event->user;

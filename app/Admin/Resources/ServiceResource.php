@@ -11,9 +11,11 @@ use App\Admin\Resources\ServiceResource\Pages\ListService;
 use App\Admin\Resources\ServiceResource\RelationManagers\ConfigOptionsRelationManager;
 use App\Admin\Resources\ServiceResource\RelationManagers\InvoicesRelationManager;
 use App\Helpers\ExtensionHelper;
+use App\Jobs\Server\TerminateJob;
 use App\Models\Currency;
 use App\Models\Product;
 use App\Models\Service;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -25,6 +27,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\RawJs;
 use Filament\Tables\Columns\TextColumn;
@@ -32,6 +35,7 @@ use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class ServiceResource extends Resource
 {
@@ -69,7 +73,26 @@ class ServiceResource extends Resource
                     ->searchable()
                     ->live()
                     ->preload()
+                    ->afterStateUpdated(function (Set $set, $state): void {
+                        if (OrderResource::isHavProxyProduct((int) $state)) {
+                            $set('status', Service::STATUS_PENDING);
+                            $set('quantity', 1);
+                            $set('product_location_offering_id', null);
+                        }
+                    })
+                    ->disabled(fn (?Service $record) => $record && ProviderOperationLifecycleService::usesDeferredOperations($record))
                     ->placeholder('Select the product'),
+                Select::make('product_location_offering_id')
+                    ->label('Location')
+                    ->options(fn (Get $get) => OrderResource::productLocationOptions($get('product_id')))
+                    ->searchable()
+                    ->preload()
+                    ->visible(fn (?Service $record, Get $get) => !$record && OrderResource::isHavProxyProduct($get('product_id')))
+                    ->disabled(fn (Get $get) => OrderResource::isHavProxyProduct($get('product_id')) && OrderResource::productLocationOptions($get('product_id')) === [])
+                    ->required(fn (Get $get) => OrderResource::isHavProxyProduct($get('product_id')))
+                    ->helperText(fn (Get $get) => OrderResource::isHavProxyProduct($get('product_id')) && OrderResource::productLocationOptions($get('product_id')) === []
+                        ? 'No provider location is currently available.'
+                        : null),
                 Select::make('plan_id')
                     ->label('Plan')
                     ->required()
@@ -89,10 +112,18 @@ class ServiceResource extends Resource
                         'suspended' => 'Suspended',
                         'cancelled' => 'Cancelled',
                     ])
+                    ->disabled(fn (?Service $record, Get $get) => ($record && ProviderOperationLifecycleService::usesDeferredOperations($record))
+                        || (!$record && OrderResource::isHavProxyProduct($get('product_id'))))
+                    ->dehydrated()
                     ->default('pending'),
                 TextInput::make('quantity')
                     ->label('Quantity')
                     ->required()
+                    ->numeric()
+                    ->integer()
+                    ->minValue(1)
+                    ->maxValue(fn (?Service $record, Get $get) => ($record && ProviderOperationLifecycleService::usesDeferredOperations($record)) || OrderResource::isHavProxyProduct($get('product_id')) ? 1 : null)
+                    ->disabled(fn (?Service $record) => $record && ProviderOperationLifecycleService::usesDeferredOperations($record))
                     ->placeholder('Enter the quantity'),
                 DatePicker::make('expires_at')
                     ->label('Expires At')
@@ -263,7 +294,21 @@ class ServiceResource extends Resource
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action): void {
+                            $providerServices = $records->filter(fn (Service $service) => $service->status !== Service::STATUS_CANCELLED
+                                && ProviderOperationLifecycleService::usesDeferredOperations($service));
+                            if ($providerServices->isEmpty()) {
+                                return;
+                            }
+
+                            $providerServices->each(fn (Service $service) => TerminateJob::dispatch($service));
+                            Notification::make('Provider terminations queued')
+                                ->title('Delete these services again after they reach cancelled status.')
+                                ->warning()
+                                ->send();
+                            $action->halt();
+                        }),
                 ]),
             ]);
     }

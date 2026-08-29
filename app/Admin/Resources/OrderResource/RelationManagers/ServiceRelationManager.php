@@ -3,12 +3,17 @@
 namespace App\Admin\Resources\OrderResource\RelationManagers;
 
 use App\Admin\Resources\ServiceResource;
+use App\Jobs\Server\TerminateJob;
+use App\Models\Service;
+use App\Services\Service\ProviderOperationLifecycleService;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Collection;
 
 class ServiceRelationManager extends RelationManager
 {
@@ -36,7 +41,21 @@ class ServiceRelationManager extends RelationManager
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->before(function (Collection $records, DeleteBulkAction $action): void {
+                            $providerServices = $records->filter(fn (Service $service) => $service->status !== Service::STATUS_CANCELLED
+                                && ProviderOperationLifecycleService::usesDeferredOperations($service));
+                            if ($providerServices->isEmpty()) {
+                                return;
+                            }
+
+                            $providerServices->each(fn (Service $service) => TerminateJob::dispatch($service));
+                            Notification::make('Provider terminations queued')
+                                ->title('Delete these services again after they reach cancelled status.')
+                                ->warning()
+                                ->send();
+                            $action->halt();
+                        }),
                 ]),
             ]);
     }

@@ -8,6 +8,7 @@ use App\Models\ProductLocationOffering;
 use App\Models\ProviderLocationOffering;
 use App\Models\ProviderLocationTarget;
 use App\Models\Service;
+use Exception;
 use Illuminate\Database\Eloquent\Collection;
 
 class LocationAvailabilityService
@@ -72,17 +73,26 @@ class LocationAvailabilityService
     public static function snapshotSelection(Service $service, int|ProviderLocationOffering $providerLocationOffering): array
     {
         $offering = $providerLocationOffering instanceof ProviderLocationOffering
-            ? $providerLocationOffering->loadMissing('locationOption', 'targets')
-            : ProviderLocationOffering::with(['locationOption', 'targets'])->findOrFail($providerLocationOffering);
+            ? $providerLocationOffering->loadMissing('provider', 'locationOption', 'targets')
+            : ProviderLocationOffering::with(['provider', 'locationOption', 'targets'])->findOrFail($providerLocationOffering);
 
         $target = self::resolveTarget($offering);
 
         $snapshot = [
+            'provider_server_id' => (string) $offering->provider_id,
+            'provider_extension' => (string) $offering->provider?->extension,
             'location_option_id' => (string) $offering->location_option_id,
             'provider_location_offering_id' => (string) $offering->id,
             'external_location_code' => (string) ($target?->external_location_code ?? $target?->external_location_id ?? ''),
             'display_name' => $offering->locationOption->display_name,
         ];
+
+        $productSettings = $service->product->settings()
+            ->whereIn('key', ['protocol', 'speed_limit_mbps', 'bandwidth_limit_mb'])
+            ->pluck('value', 'key');
+        foreach ($productSettings as $key => $value) {
+            $snapshot['hav_proxy_ipv4_dc_' . $key] = (string) $value;
+        }
 
         foreach ($snapshot as $key => $value) {
             $service->properties()->updateOrCreate([
@@ -96,9 +106,47 @@ class LocationAvailabilityService
         return $snapshot;
     }
 
+    /**
+     * Freeze the selected provider target while the customer order is created.
+     * Provisioning must not depend on mutable product mappings after payment.
+     */
+    public static function snapshotProductOffering(Service $service, int $productLocationOfferingId, ?string $serviceType = null): array
+    {
+        $productOffering = ProductLocationOffering::query()
+            ->with(['providerLocationOffering.locationOption', 'providerLocationOffering.targets'])
+            ->whereKey($productLocationOfferingId)
+            ->where('product_id', $service->product_id)
+            ->where('enabled', true)
+            ->first();
+
+        if (!$productOffering) {
+            throw new Exception('Selected location is not enabled for this product.');
+        }
+
+        $providerOffering = $productOffering->providerLocationOffering;
+        if (!$providerOffering || $providerOffering->provider_id !== $service->product->server_id) {
+            throw new Exception('Selected location belongs to a different provider.');
+        }
+        if ($serviceType && $providerOffering->service_type !== $serviceType) {
+            throw new Exception('Selected location is not available for this service type.');
+        }
+        if (!$providerOffering->isSellable()) {
+            throw new Exception('Selected location is out of stock.');
+        }
+
+        $target = self::resolveTarget($providerOffering);
+        if (!$target?->external_location_code) {
+            throw new Exception('Selected location is missing provider group mapping.');
+        }
+
+        return self::snapshotSelection($service, $providerOffering);
+    }
+
     public static function checkoutOptionsForProduct(int|Product $product, ?string $serviceType = null): array
     {
         return self::forProduct($product, $serviceType)
+            ->filter(fn (ProductLocationOffering $productOffering) => $productOffering->providerLocationOffering->isSellable())
+            ->filter(fn (ProductLocationOffering $productOffering) => self::resolveTarget($productOffering->providerLocationOffering) !== null)
             ->mapWithKeys(function (ProductLocationOffering $productOffering) {
                 $providerOffering = $productOffering->providerLocationOffering;
                 $location = $providerOffering->locationOption;
