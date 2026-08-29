@@ -1,0 +1,18 @@
+{
+    "fixture_metadata": {
+        "fixture": "error_429_busy",
+        "description": "POST /order returning HTTP 429 because another account transaction is being processed; release the request, back off, and retry under the provider lock.",
+        "method": "POST",
+        "endpoint": "/order",
+        "http_status": 429,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the error msg wording is diagnostic text only and data is null; exact provider msg is not confirmed."
+        ]
+    },
+    "body": {
+        "error": true,
+        "msg": "FAKE: Another account transaction is being processed.",
+        "data": null
+    }
+}

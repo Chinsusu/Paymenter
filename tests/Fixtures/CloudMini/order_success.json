@@ -1,0 +1,22 @@
+{
+    "fixture_metadata": {
+        "fixture": "order_success",
+        "description": "POST /order returning HTTP 200 success with an obvious fake order_id, an obvious fake resource_id, and an integer VND price.",
+        "method": "POST",
+        "endpoint": "/order",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the success data object exposes order_id, resource_id, and integer VND price; order_id and resource_id are fake and field names are invented, not confirmed against the provider."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": {
+            "order_id": "FAKE-ORD-000001",
+            "resource_id": "FAKE-RES-000001",
+            "price": 150000
+        }
+    }
+}

@@ -1,0 +1,29 @@
+{
+    "fixture_metadata": {
+        "fixture": "order_config_type_unsupported_full_catalog",
+        "description": "GET /order_config?type=zz-unsupported-fake-type. Documented catalog inconsistency: an unsupported filter returns the complete unfiltered catalog instead of an error; body.data is copied from order_config_full.",
+        "endpoint": "GET /order_config?type=zz-unsupported-fake-type",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Documented: an unsupported filter can return the complete catalog instead of an error (openapi_endpoint_metadata.known_catalog_inconsistencies); body.data is byte-for-byte identical to order_config_full body.data.",
+            "Assumed: zz-unsupported-fake-type is a fabricated query value and is not a documented order type.",
+            "Assumed: raw item field names (type, region, plan, price, os, isp, protocol, cpu, regions) are assumed; the provider does not document the raw order_config item schema."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": [
+            { "type": "proxy", "region": "California", "plan": "1 Month", "price": 120000, "os": [], "isp": [], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "proxy", "region": "Viet Nam - FPT", "plan": "1 Month", "price": 130000, "os": [], "isp": ["FPT"], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "budgetV4", "region": "California", "plan": "1 Month", "price": 60000, "os": [], "isp": [], "protocol": ["SOCKS5"] },
+            { "type": "proxy-res-static", "region": "US", "plan": "1 Month", "price": 120000, "os": [], "isp": ["Comcast", "Lumen"], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "budgetRes", "region": "US", "plan": "1 Month", "price": 90000, "os": [], "isp": ["Comcast"], "protocol": ["SOCKS5"] },
+            { "type": "normal", "region": "California", "plan": "1 vCPU / 1 GB / 10 GB", "price": 150000, "os": ["Ubuntu 22.04", "Debian 12"], "isp": [], "protocol": [], "cpu": "int[1-16]" },
+            { "type": "normal", "region": "", "plan": "Empty Region Group", "price": 0, "os": [], "isp": [], "protocol": [], "regions": [] },
+            { "type": "normal", "region": "Viet Nam - FPT", "plan": "2 vCPU / 2 GB / 20 GB", "price": 0, "os": ["Ubuntu 22.04"], "isp": [], "protocol": [] },
+            { "type": "custom", "region": "California", "plan": "1 vCPU / 2 GB / 15 GB", "price": 200000, "os": ["CentOS 7 (EOL)"], "isp": [], "protocol": [] }
+        ]
+    }
+}

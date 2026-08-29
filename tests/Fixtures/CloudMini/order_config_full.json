@@ -1,0 +1,30 @@
+{
+    "fixture_metadata": {
+        "fixture": "order_config_full",
+        "description": "Unfiltered GET /order_config full catalog. Deliberately small; preserves the documented catalog inconsistencies.",
+        "endpoint": "GET /order_config",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Raw item field names (type, region, plan, price, os, isp, protocol, cpu) are assumed; the provider does not document the raw order_config item schema.",
+            "Prices are fake integer VND values and region labels follow the documented styles (city labels and country codes).",
+            "Preserves documented inconsistencies: an empty-region plan group, sentinel price 0 for disabled plans, the string constraint int[1-16], and a catalog OS value that no documented enum contains.",
+            "Intentionally contains no type=nn items; the documented type=nn query behavior is covered by order_config_type_nn."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": [
+            { "type": "proxy", "region": "California", "plan": "1 Month", "price": 120000, "os": [], "isp": [], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "proxy", "region": "Viet Nam - FPT", "plan": "1 Month", "price": 130000, "os": [], "isp": ["FPT"], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "budgetV4", "region": "California", "plan": "1 Month", "price": 60000, "os": [], "isp": [], "protocol": ["SOCKS5"] },
+            { "type": "proxy-res-static", "region": "US", "plan": "1 Month", "price": 120000, "os": [], "isp": ["Comcast", "Lumen"], "protocol": ["SOCKS5", "HTTP"] },
+            { "type": "budgetRes", "region": "US", "plan": "1 Month", "price": 90000, "os": [], "isp": ["Comcast"], "protocol": ["SOCKS5"] },
+            { "type": "normal", "region": "California", "plan": "1 vCPU / 1 GB / 10 GB", "price": 150000, "os": ["Ubuntu 22.04", "Debian 12"], "isp": [], "protocol": [], "cpu": "int[1-16]" },
+            { "type": "normal", "region": "", "plan": "Empty Region Group", "price": 0, "os": [], "isp": [], "protocol": [], "regions": [] },
+            { "type": "normal", "region": "Viet Nam - FPT", "plan": "2 vCPU / 2 GB / 20 GB", "price": 0, "os": ["Ubuntu 22.04"], "isp": [], "protocol": [] },
+            { "type": "custom", "region": "California", "plan": "1 vCPU / 2 GB / 15 GB", "price": 200000, "os": ["CentOS 7 (EOL)"], "isp": [], "protocol": [] }
+        ]
+    }
+}

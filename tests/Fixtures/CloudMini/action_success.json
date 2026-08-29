@@ -1,0 +1,21 @@
+{
+    "fixture_metadata": {
+        "fixture": "action_success",
+        "description": "POST /action with action=renew for an obvious fake resource returning HTTP 200 success.",
+        "method": "POST",
+        "endpoint": "/action",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed a successful renew action returns error=false, an empty msg, and a data object exposing the renewed resource id as resource_id; field name and shape are invented, not confirmed against the provider.",
+            "Assumed resource_id is an obvious fake identifier for the renewed resource."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": {
+            "resource_id": "FAKE-RES-000007"
+        }
+    }
+}

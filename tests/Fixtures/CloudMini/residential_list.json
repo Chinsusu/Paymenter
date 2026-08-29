@@ -1,0 +1,32 @@
+{
+    "fixture_metadata": {
+        "fixture": "residential_list",
+        "description": "GET /residential/list returning HTTP 200 with one fake residential package bound to rota.cloudmini.net:8080, fake credentials, integer bandwidth total/used, and a 120-day date pair.",
+        "method": "GET",
+        "endpoint": "/residential/list",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the success data for GET /residential/list is a JSON array of package objects; array shape is invented, not confirmed against the provider.",
+            "Assumed each package exposes id, host, port, username, password, integer bandwidth_total, integer bandwidth_used, and a start_date/end_date pair exactly 120 days apart; field names and shape are invented, not confirmed against the provider.",
+            "Assumed bandwidth values are integers with an unconfirmed unit, the id and credentials are obvious fakes, and the endpoint is the fake host rota.cloudmini.net on port 8080."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": [
+            {
+                "id": "FAKE-RSL-000001",
+                "host": "rota.cloudmini.net",
+                "port": 8080,
+                "username": "FAKE-res-user-0001",
+                "password": "FAKE-res-pass-0001",
+                "bandwidth_total": 100000,
+                "bandwidth_used": 35000,
+                "start_date": "2026-01-01",
+                "end_date": "2026-05-01"
+            }
+        ]
+    }
+}

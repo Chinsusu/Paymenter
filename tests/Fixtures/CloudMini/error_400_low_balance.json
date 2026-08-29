@@ -1,0 +1,18 @@
+{
+    "fixture_metadata": {
+        "fixture": "error_400_low_balance",
+        "description": "POST /order returning HTTP 400 low balance; definitive failure, do not retry.",
+        "method": "POST",
+        "endpoint": "/order",
+        "http_status": 400,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the error msg wording is diagnostic text only and data is null; exact provider msg is not confirmed."
+        ]
+    },
+    "body": {
+        "error": true,
+        "msg": "FAKE: Low balance.",
+        "data": null
+    }
+}

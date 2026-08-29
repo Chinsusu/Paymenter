@@ -1,0 +1,69 @@
+{
+    "fixture_metadata": {
+        "fixture": "openapi_endpoint_metadata",
+        "description": "Conservative CloudMini API v2 endpoint metadata derived from the documented contract. This is not the raw provider OpenAPI document and no undocumented parameters, schemas, or capabilities are added.",
+        "confirmed": true,
+        "assumptions": []
+    },
+    "body": {
+        "name": "CloudMini API",
+        "version": "v2.0.0",
+        "base_url": "https://client.cloudmini.net/api/v2",
+        "auth_header": "Authorization: Token {access_token}",
+        "form_encoding": "application/x-www-form-urlencoded",
+        "endpoints": [
+            { "method": "GET", "path": "/account", "use": "Read balance and credit/points" },
+            { "method": "GET", "path": "/order_config", "use": "Read public plans, prices, OS options, regions, ISP options, and protocols" },
+            { "method": "GET", "path": "/order", "query": "id", "use": "Read an order by upstream order ID" },
+            { "method": "POST", "path": "/order", "use": "Purchase a VPS or static proxy service" },
+            { "method": "GET", "path": "/vps", "use": "List active VPS resources" },
+            { "method": "GET", "path": "/proxy", "use": "List active proxy resources" },
+            { "method": "GET", "path": "/action", "use": "Read action names supported by the account" },
+            { "method": "POST", "path": "/action", "use": "Renew or execute a supported service action" },
+            { "method": "POST", "path": "/residential/order", "use": "Purchase a rotating residential bandwidth package" },
+            { "method": "GET", "path": "/residential/list", "use": "List rotating residential packages and usage" }
+        ],
+        "envelope": {
+            "keys": ["error", "msg", "data"],
+            "example": { "error": false, "msg": "", "data": [] },
+            "rule": "Both the HTTP status and the error field must be checked. A 200 response is not a successful operation when error is true. msg is diagnostic text only; the provider exposes no stable machine-readable error codes."
+        },
+        "documented_http_failures": {
+            "400": "Invalid request or low balance. Definitive failure; do not retry.",
+            "401": "Invalid or missing token. Disable provisioning and alert an administrator.",
+            "429": "Another account transaction is being processed. Release the request, back off, and retry under the provider lock.",
+            "500": "Provider internal error. Ambiguous for write requests; enter manual recovery."
+        },
+        "documented_order_types": [
+            "proxy",
+            "budgetV4",
+            "proxy-res-static",
+            "budgetRes",
+            "normal",
+            "nn",
+            "nnx",
+            "yt",
+            "custom",
+            "promo",
+            "proxy-v6",
+            "proxy-res"
+        ],
+        "known_catalog_inconsistencies": [
+            "Querying type=nn returns an item whose internal type is normal.",
+            "An unsupported filter can return the complete catalog instead of an error.",
+            "Some plan groups have an empty region list.",
+            "Some prices act as disabled-plan sentinel values.",
+            "Numeric constraints can be encoded as strings such as int[1-16].",
+            "The OpenAPI enum and catalog values are not fully aligned."
+        ],
+        "not_documented": [
+            "idempotency keys or client order references",
+            "delete, terminate, suspend, or unsuspend endpoints",
+            "webhooks or asynchronous operation endpoints",
+            "stable provider location IDs",
+            "stock or capacity endpoints",
+            "machine-readable error codes",
+            "sandbox account or non-billable provisioning endpoint"
+        ]
+    }
+}

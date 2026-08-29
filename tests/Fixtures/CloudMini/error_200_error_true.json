@@ -1,0 +1,18 @@
+{
+    "fixture_metadata": {
+        "fixture": "error_200_error_true",
+        "description": "POST /action returning HTTP 200 but with error=true in the envelope; a 200 is not a successful operation when error is true.",
+        "method": "POST",
+        "endpoint": "/action",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the error msg wording is diagnostic text only and data is null; exact provider msg is not confirmed."
+        ]
+    },
+    "body": {
+        "error": true,
+        "msg": "FAKE: Action failed.",
+        "data": null
+    }
+}

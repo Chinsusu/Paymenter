@@ -1,0 +1,21 @@
+{
+    "fixture_metadata": {
+        "fixture": "order_config_type_nn",
+        "description": "GET /order_config?type=nn. Documented catalog inconsistency: the query returns a single item whose internal type is normal.",
+        "endpoint": "GET /order_config?type=nn",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Documented: type=nn is a documented order type and querying it returns an item whose internal type is normal (openapi_endpoint_metadata.known_catalog_inconsistencies).",
+            "Assumed: the specific normal item returned by the nn query is not documented; the first normal item from order_config_full is used.",
+            "Assumed: raw item field names (type, region, plan, price, os, isp, protocol, cpu) are assumed; the provider does not document the raw order_config item schema."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": [
+            { "type": "normal", "region": "California", "plan": "1 vCPU / 1 GB / 10 GB", "price": 150000, "os": ["Ubuntu 22.04", "Debian 12"], "isp": [], "protocol": [], "cpu": "int[1-16]" }
+        ]
+    }
+}

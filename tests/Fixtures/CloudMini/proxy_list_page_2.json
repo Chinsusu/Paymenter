@@ -1,0 +1,34 @@
+{
+    "fixture_metadata": {
+        "fixture": "proxy_list_page_2",
+        "description": "GET /proxy returning HTTP 200 with the final page of the paginated fake proxy list: page 2, has_more false, and one fake proxy item distinct from page 1.",
+        "method": "GET",
+        "endpoint": "/proxy",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed GET /proxy paginates with a 1-based integer page key, a boolean has_more key, and an items array, all under data; pagination scheme is invented, not confirmed against the provider.",
+            "Assumed each item exposes id, ip, https_port, socks_port, username, password, and an integer VND price; item shape and field names are invented, not confirmed against the provider.",
+            "Assumed all ids, ips, usernames, and passwords are obvious fakes; ips are restricted to the RFC 5737 documentation ranges 192.0.2.0/24, 198.51.100.0/24, and 203.0.113.0/24, and prices are fake integer VND amounts."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": {
+            "page": 2,
+            "has_more": false,
+            "items": [
+                {
+                    "id": "FAKE-PRX-000003",
+                    "ip": "203.0.113.30",
+                    "https_port": 8443,
+                    "socks_port": 1082,
+                    "username": "FAKE-user-0003",
+                    "password": "FAKE-pass-0003",
+                    "price": 55000
+                }
+            ]
+        }
+    }
+}

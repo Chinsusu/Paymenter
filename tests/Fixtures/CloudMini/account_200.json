@@ -1,0 +1,21 @@
+{
+    "fixture_metadata": {
+        "fixture": "account_200",
+        "description": "GET /account returning HTTP 200 with a fake integer VND balance and credit in the data payload.",
+        "method": "GET",
+        "endpoint": "/account",
+        "http_status": 200,
+        "confirmed": false,
+        "assumptions": [
+            "Assumed the success data object exposes integer VND fields named balance and credit; field names and shape are invented, not confirmed against the provider."
+        ]
+    },
+    "body": {
+        "error": false,
+        "msg": "",
+        "data": {
+            "balance": 120000,
+            "credit": 30000
+        }
+    }
+}
